@@ -1,4 +1,6 @@
 ﻿using System;
+using System.IO;
+using System.Text.Json;
 
 namespace VB_build
 {
@@ -7,10 +9,12 @@ namespace VB_build
         public static bool[] log;
         public static string err, starttime = DateTime.Now.ToString(), endtime;
         public static int er = 0;
+        private static BuildOptions options = BuildOptions.Default;
 
         public static void Main(string[] args)
         {
-            Controller con = new Controller();
+            options = LoadOptions();
+            Controller con = new Controller(options);
             bool check = true;
             if (args[0].Equals("-D"))
             {
@@ -50,12 +54,41 @@ namespace VB_build
             }
         }
 
+        /// <summary>
+        /// Loads <see cref="BuildOptions"/> from an optional "appsettings.json" placed next to
+        /// the executable (matching the shape of <see cref="BuildOptions"/> properties). When
+        /// absent or invalid, falls back to <see cref="BuildOptions.Default"/> so behavior is
+        /// unchanged from the original hardcoded paths.
+        /// </summary>
+        private static BuildOptions LoadOptions()
+        {
+            try
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
+                if (!File.Exists(path))
+                {
+                    return BuildOptions.Default;
+                }
+
+                string json = File.ReadAllText(path);
+                BuildOptions loaded = JsonSerializer.Deserialize<BuildOptions>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+                return loaded ?? BuildOptions.Default;
+            }
+            catch
+            {
+                return BuildOptions.Default;
+            }
+        }
+
         private static int getLog(string type, string version, string compat, string filename)
         {
             int error = 0;
             filename = filename.Substring((filename.Substring(0, filename.LastIndexOf('\\'))).LastIndexOf('\\') + 1);
             filename = filename.Substring(0, filename.IndexOf('\\')) + filename.Substring(filename.LastIndexOf('\\') + 1);
-            string path = "D:\\log" + type + "_" + version + "_" + compat + "_" + filename + ".txt";
+            string path = options.LogFolder.TrimEnd('\\') + "\\log" + type + "_" + version + "_" + compat + "_" + filename + ".txt";
             if (System.IO.File.Exists(path))
             {
                 System.IO.File.Delete(path);
