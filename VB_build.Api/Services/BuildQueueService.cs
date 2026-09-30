@@ -33,6 +33,7 @@ namespace VB_build.Api.Services
 
                 job.Status = BuildJobStatus.Running;
 
+                JobConsoleWriter.CurrentJob.Value = job;
                 try
                 {
                     BuildResult result = runner.Run(job.Request);
@@ -47,6 +48,7 @@ namespace VB_build.Api.Services
                 }
                 finally
                 {
+                    JobConsoleWriter.CurrentJob.Value = null;
                     job.CompletedAt = DateTimeOffset.UtcNow;
                 }
             }

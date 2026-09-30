@@ -6,6 +6,11 @@ using VB_build.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Install JobConsoleWriter once at startup: it transparently passes all console output through
+// to the original stdout, while also capturing per-job progress lines (see BuildQueueService)
+// for the status-polling endpoint below. No changes needed in VB_build.Core for this to work.
+Console.SetOut(new JobConsoleWriter(Console.Out));
+
 // BuildOptions (VB6.EXE / verpatch / temp folder paths) are bound from configuration
 // (appsettings.json "BuildOptions" section / environment variables), falling back to the
 // same defaults the original hardcoded console app used.
@@ -48,21 +53,23 @@ app.MapPost("/api/build/trigger", (BuildTriggerRequest request, BuildJobStore st
 })
 .AddEndpointFilter<ApiKeyEndpointFilter>();
 
-// GET /api/build/status/{jobId} - current status/result of a previously triggered build job.
-app.MapGet("/api/build/status/{jobId}", (string jobId, BuildJobStore store) =>
+// GET /api/build/status/{jobId}?since=N - current status/result of a previously triggered
+// build job. "since" (default 0) lets Jenkins do incremental polling: pass back the previous
+// response's "nextSince" to receive only new progress lines since the last poll.
+app.MapGet("/api/build/status/{jobId}", (string jobId, BuildJobStore store, int since = 0) =>
 {
     if (!store.TryGet(jobId, out BuildJob job))
     {
         return Results.NotFound();
     }
 
-    return Results.Ok(ToResponse(job));
+    return Results.Ok(ToResponse(job, since));
 })
 .AddEndpointFilter<ApiKeyEndpointFilter>();
 
 app.Run();
 
-static BuildJobStatusResponse ToResponse(BuildJob job) => new()
+static BuildJobStatusResponse ToResponse(BuildJob job, int since = 0) => new()
 {
     JobId = job.Id,
     Status = job.Status.ToString(),
@@ -70,7 +77,10 @@ static BuildJobStatusResponse ToResponse(BuildJob job) => new()
     ErrorCount = job.Result?.ErrorCount,
     ErrorMessage = job.Result?.ErrorMessage,
     CreatedAt = job.CreatedAt,
-    CompletedAt = job.CompletedAt
+    CompletedAt = job.CompletedAt,
+    CurrentStep = job.CurrentStep,
+    LogLines = job.GetLogLinesSince(since),
+    NextSince = job.LogLineCount
 };
 
 // Exposes the generated Program class publicly so WebApplicationFactory<Program> can be used

@@ -62,6 +62,7 @@ namespace VB_build.Api.Tests
         [Fact]
         public async Task Trigger_ThenStatus_CompletesUsingFakeRunner()
         {
+            factory.BuildRunner.Received.Clear();
             factory.BuildRunner.RunHandler = _ => new BuildResult { ErrorCount = 0, StepResults = new bool[10] };
 
             HttpClient client = factory.CreateClient();
@@ -130,6 +131,58 @@ namespace VB_build.Api.Tests
             Assert.Equal("Failed", final!.Status);
             Assert.False(final.Success);
             Assert.Equal("simulated failure", final.ErrorMessage);
+        }
+
+        [Fact]
+        public async Task Trigger_ThenStatus_ReportsIncrementalProgressLines()
+        {
+            factory.BuildRunner.RunHandler = _ =>
+            {
+                Console.Write("Delete Old Temp File: ");
+                Console.WriteLine("Successful...");
+                Console.Write("Build Project: ");
+                Console.WriteLine("Successful...");
+                return new BuildResult { ErrorCount = 0, StepResults = new bool[10] };
+            };
+
+            HttpClient client = factory.CreateClient();
+            client.DefaultRequestHeaders.Add(ApiKeyEndpointFilter.HeaderName, ApiTestFactory.TestApiKey);
+
+            HttpResponseMessage triggerResponse = await client.PostAsJsonAsync("/api/build/trigger", SampleRequest());
+            BuildJobStatusResponse? triggered = await triggerResponse.Content.ReadFromJsonAsync<BuildJobStatusResponse>();
+
+            BuildJobStatusResponse? final = null;
+            for (int i = 0; i < 20; i++)
+            {
+                HttpResponseMessage statusResponse = await client.GetAsync($"/api/build/status/{triggered!.JobId}");
+                final = await statusResponse.Content.ReadFromJsonAsync<BuildJobStatusResponse>();
+
+                if (final!.Status is "Completed" or "Failed")
+                {
+                    break;
+                }
+
+                await Task.Delay(50);
+            }
+
+            Assert.NotNull(final);
+            Assert.Equal("Completed", final!.Status);
+            Assert.Equal(new[] { "Delete Old Temp File: Successful...", "Build Project: Successful..." }, final.LogLines);
+            Assert.Equal("Build Project: Successful...", final.CurrentStep);
+            Assert.Equal(2, final.NextSince);
+
+            // Incremental poll: asking again with since = final.NextSince should return no new lines.
+            HttpResponseMessage incrementalResponse = await client.GetAsync($"/api/build/status/{triggered!.JobId}?since={final.NextSince}");
+            BuildJobStatusResponse? incremental = await incrementalResponse.Content.ReadFromJsonAsync<BuildJobStatusResponse>();
+            Assert.NotNull(incremental);
+            Assert.Empty(incremental!.LogLines);
+            Assert.Equal("Build Project: Successful...", incremental.CurrentStep);
+
+            // since = 1 should return only the line(s) produced after the first one.
+            HttpResponseMessage sinceOneResponse = await client.GetAsync($"/api/build/status/{triggered.JobId}?since=1");
+            BuildJobStatusResponse? sinceOne = await sinceOneResponse.Content.ReadFromJsonAsync<BuildJobStatusResponse>();
+            Assert.NotNull(sinceOne);
+            Assert.Equal(new[] { "Build Project: Successful..." }, sinceOne!.LogLines);
         }
     }
 }

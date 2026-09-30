@@ -38,8 +38,8 @@ sequenceDiagram
         API-->>J: 202 Accepted { jobId, status: "Queued" }
 
         loop Jenkins polls until Completed/Failed
-            J->>API: GET /api/build/status/{jobId} (X-Api-Key)
-            API-->>J: { status, success, errorCount, errorMessage }
+            J->>API: GET /api/build/status/{jobId}?since=N (X-Api-Key)
+            API-->>J: { status, currentStep, logLines[], nextSince, success, errorCount, errorMessage }
         end
 
         Q->>W: Dequeue jobId
@@ -52,12 +52,13 @@ sequenceDiagram
         VB6-->>Core: build output (.dll/.exe)
         Core->>Core: moveFile (to RefPath / BuildExeFolder)
         Core->>Core: changeVersion (verpatch.exe)
+        Note over Core,W: Each step's Console.Write/WriteLine is captured live<br/>by JobConsoleWriter and appended to the job's logLines
         Core-->>W: BuildResult (StepResults, Success, ErrorMessage)
         W->>W: job.Status = Completed / Failed
         W->>W: Store result in BuildJobStore
 
-        J->>API: GET /api/build/status/{jobId} (final poll)
-        API-->>J: { status: "Completed"/"Failed", success, errorMessage }
+        J->>API: GET /api/build/status/{jobId}?since=N (final poll)
+        API-->>J: { status: "Completed"/"Failed", success, errorMessage, logLines[] }
         J->>J: Fail pipeline stage if success == false
     end
 ```
@@ -118,21 +119,47 @@ Content-Type: application/json
 Returns `202 Accepted` immediately with a job id:
 
 ```json
-{ "jobId": "…", "status": "Queued", "success": null, "errorCount": null, "errorMessage": null, "createdAt": "…", "completedAt": null }
+{ "jobId": "…", "status": "Queued", "success": null, "errorCount": null, "errorMessage": null, "createdAt": "…", "completedAt": null, "currentStep": null, "logLines": [], "nextSince": 0 }
 ```
 
 Builds run **one at a time** (a single background worker), because VB6/COM automation is
 not safe to run concurrently.
 
-### Poll for status
+### Poll for status (with step-by-step progress)
 
 ```
-GET /api/build/status/{jobId}
+GET /api/build/status/{jobId}?since=0
 X-Api-Key: <key>
 ```
 
-`status` is one of `Queued`, `Running`, `Completed`, `Failed`. Have the Jenkins pipeline
-poll this endpoint until `status` is `Completed` or `Failed`, then branch on `success`.
+`status` is one of `Queued`, `Running`, `Completed`, `Failed`. In addition to the coarse
+`status`, the response reports **exactly what step the build is on right now**, captured
+live from the same step-by-step messages `Controller.cs` already produces (e.g.
+`"Delete Old Temp File: Successful..."`, `"Build Project: Successful..."`):
+
+- `currentStep` — the most recent progress line (always the very latest, regardless of `since`).
+- `logLines` — progress lines with index `>= since` (all lines so far, if `since` is omitted/`0`).
+- `nextSince` — pass this straight back as the `since` query parameter on your next poll to
+  get only the lines produced since this response, for chatty/incremental Jenkins logging.
+
+Example mid-build response:
+
+```json
+{
+  "jobId": "4a99bdcf...",
+  "status": "Running",
+  "success": null,
+  "errorCount": null,
+  "errorMessage": null,
+  "currentStep": "Edit VBProject: Successful...",
+  "logLines": ["Delete Old Temp File: Successful...", "Create New Temp File: Successful...", "Edit VBProject: Successful..."],
+  "nextSince": 3
+}
+```
+
+Have the Jenkins pipeline poll this endpoint (passing `nextSince` back as `since` each
+time) until `status` is `Completed` or `Failed`, printing each new `logLines` entry as it
+arrives, then branch on `success`.
 
 ### Example Jenkins pipeline step
 
@@ -143,11 +170,14 @@ def trigger = httpRequest url: "$API_URL/api/build/trigger",
     requestBody: groovy.json.JsonOutput.toJson([isDll: true, buildPath: '...', refPath: '...', version: '...', compat: '-b', time: '1', command: []])
 def jobId = readJSON(text: trigger.content).jobId
 
+def since = 0
 timeout(time: 20, unit: 'MINUTES') {
     waitUntil {
-        def status = httpRequest url: "$API_URL/api/build/status/${jobId}",
+        def status = httpRequest url: "$API_URL/api/build/status/${jobId}?since=${since}",
             customHeaders: [[name: 'X-Api-Key', value: env.VB6_API_KEY]]
         def body = readJSON(text: status.content)
+        body.logLines.each { echo it }   // print each new build step as it happens
+        since = body.nextSince
         return body.status in ['Completed', 'Failed']
     }
 }
