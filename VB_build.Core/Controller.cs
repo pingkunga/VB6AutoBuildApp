@@ -8,7 +8,7 @@ using System.Reflection;
 
 namespace VB_build
 {
-    internal class Controller
+    public class Controller
     {
 
         public struct FormItem
@@ -27,6 +27,16 @@ namespace VB_build
         private bool check32Bit = true;
         private int time = 0;
         private string[] command;
+        private readonly BuildOptions options;
+
+        public Controller() : this(BuildOptions.Default)
+        {
+        }
+
+        public Controller(BuildOptions options)
+        {
+            this.options = options ?? BuildOptions.Default;
+        }
 
         private bool buildVBProject(bool type, string build_path, string ref_path, string compat)
         {
@@ -160,11 +170,11 @@ namespace VB_build
             {
                 if (type)
                 {
-                    commandText = "D:\\verpatch.exe \"" + ref_path + "\\" + this.filename + ".dll\" " + version + " /va /pv " + version + " /s product \"" + this.filename + "\" /sc \"(" + DateTime.Now + ")\"";
+                    commandText = "\"" + this.options.VerpatchExePath + "\" \"" + ref_path + "\\" + this.filename + ".dll\" " + version + " /va /pv " + version + " /s product \"" + this.filename + "\" /sc \"(" + DateTime.Now + ")\"";
                 }
                 else
                 {
-                    commandText = "D:\\verpatch.exe \"C:\\BuildExe\\" + this.filename + ".exe\" " + version + " /va /pv " + version + " /s product \"" + this.filename + "\" /sc \"(" + DateTime.Now + ")\"";
+                    commandText = "\"" + this.options.VerpatchExePath + "\" \"" + this.options.BuildExeFolder + "\\" + this.filename + ".exe\" " + version + " /va /pv " + version + " /s product \"" + this.filename + "\" /sc \"(" + DateTime.Now + ")\"";
                 }
                 cmd.StandardInput.WriteLine(commandText);
                 cmd.StandardInput.Flush();
@@ -209,11 +219,11 @@ namespace VB_build
             {
                 if (check32Bit)
                 {
-                    vb6 = "\"C:\\Program Files\\Microsoft Visual Studio\\VB98\\VB6.EXE\" /Make \"";
+                    vb6 = "\"" + this.options.Vb6ExePathOn32BitOs + "\" /Make \"";
                 }
                 else
                 {
-                    vb6 = "\"C:\\Program Files (x86)\\Microsoft Visual Studio\\VB98\\VB6.EXE\" /Make \"";
+                    vb6 = "\"" + this.options.Vb6ExePathOn64BitOs + "\" /Make \"";
                 }
                 vb6 += (path + "\"");
                 int count = 0, max = this.command.Length;
@@ -286,7 +296,7 @@ namespace VB_build
             }
             else
             {
-                destinasion = @"C:\BuildExe\" + this.filename + ".exe";
+                destinasion = this.options.BuildExeFolder + "\\" + this.filename + ".exe";
             }
             if (System.IO.File.Exists(destinasion))
             {
@@ -506,11 +516,11 @@ namespace VB_build
                             string tmp;
                             if (check32Bit)
                             {
-                                tmp = @"Reference=*\G{BD4B4E53-F7B8-11D0-964D-00A0C9273C2A}#b.0#0#C:\Program Files\Common Files\Crystal Decisions\3.0\bin\craxdui.dll#Crystal Reports ActiveX Designer Library 11.0";
+                                tmp = @"Reference=*\G{BD4B4E53-F7B8-11D0-964D-00A0C9273C2A}#b.0#0#" + this.options.CraxduiPathOn32BitOs + "#Crystal Reports ActiveX Designer Library 11.0";
                             }
                             else
                             {
-                                tmp = @"Reference=*\G{BD4B4E53-F7B8-11D0-964D-00A0C9273C2A}#b.0#0#C:\Program Files (x86)\Common Files\Crystal Decisions\3.0\bin\craxdui.dll#Crystal Reports ActiveX Designer Library 11.0";
+                                tmp = @"Reference=*\G{BD4B4E53-F7B8-11D0-964D-00A0C9273C2A}#b.0#0#" + this.options.CraxduiPathOn64BitOs + "#Crystal Reports ActiveX Designer Library 11.0";
                             }
                             text.Add(count, tmp);
                         }
@@ -561,7 +571,7 @@ namespace VB_build
         private bool setValueDll(string build_path)
         {
             bool check = true;
-            string[] tempdlls = System.IO.Directory.GetFiles(@"C:\tempFile_vbauto\");
+            string[] tempdlls = System.IO.Directory.GetFiles(this.options.TempDllFolder);
             Console.Write("Generate File DLLs: ");
             try
             {
@@ -599,7 +609,13 @@ namespace VB_build
         private FormItem generateGUID(string file)
         {
             FormItem dll = new FormItem();
-            TLI.TypeLibInfo guid = new TLI.TLIApplication().TypeLibInfoFromFile(file);
+            // Late-bound COM automation (instead of a compile-time <COMReference>) so this
+            // project can build with `dotnet build`/`dotnet test` without the TLI type library
+            // being registered at build time. TLI ("Visual Basic 6.0 IDE") must still be
+            // registered on the machine at RUNTIME (i.e. VB6 installed) to actually run a build.
+            Type tliApplicationType = Type.GetTypeFromProgID("TLI.TLIApplication");
+            dynamic tliApplication = Activator.CreateInstance(tliApplicationType);
+            dynamic guid = tliApplication.TypeLibInfoFromFile(file);
             dll.ref_tmp_files = file;
             dll.filename = guid.Name;
             dll.guid = guid.GUID.ToString();
@@ -611,7 +627,7 @@ namespace VB_build
 
         private bool createTempDLL(string ref_path)
         {
-            string destPath = @"C:\tempFile_vbauto\";
+            string destPath = this.options.TempDllFolder;
             bool check = true;
 
             //Prepare Temp Folder

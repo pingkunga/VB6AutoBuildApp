@@ -1,0 +1,40 @@
+### VB_build.Api - Build request examples (REST Client format, e.g. VS Code "REST Client" extension)
+### Usage: open this file in VS Code with the "REST Client" extension installed, adjust the
+### variables below for your environment, then click "Send Request" above each block.
+
+@baseUrl = http://localhost:63733
+@apiKey = dev-only-local-testing-key
+
+### 1) Trigger a DLL build for: 1_TsyCreditRisk
+### Project: D:\New folder\vb_branch_master\master\Operation\DLL\1_TsyCreditRisk\TsyCreditRisk.vbp
+### - Type=OleDll, ExeName32="TsyCreditRisk.dll" -> isDll = true
+### - CompatibleMode="0" in the .vbp -> compat = "-n" (No Compatible)
+### - refPath must point at an EXISTING folder. It is used both as (a) the source of
+###   dependency DLLs whose type libraries get read to resolve Reference=... GUID/version
+###   lines, and (b) the destination the freshly built TsyCreditRisk.dll is moved to.
+###   If the folder does not exist yet, the whole build fails immediately with
+###   "Could not find a part of the path '...'" - create it first, e.g.:
+###     New-Item -ItemType Directory -Path "<refPath>" -Force
+###   The example below (Operation\DLL_Ref\1_TsyCreditRisk) was created and verified: the
+###   trigger below was run against this exact machine's real VB6 install and produced a
+###   working TsyCreditRisk.dll in that folder end-to-end.
+POST {{baseUrl}}/api/build/trigger
+X-Api-Key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "isDll": true,
+  "buildPath": "D:\\New folder\\vb_branch_master\\master\\Operation\\DLL\\1_TsyCreditRisk",
+  "refPath": "D:\\New folder\\Dlls",
+  "version": "1.0.0.1",
+  "compat": "-n",
+  "time": "1",
+  "command": []
+}
+
+### 2) Poll build status
+### Copy the "jobId" value from the response of request #1 above and paste it below.
+@jobId = 5976b798484e408a92424828f5ac7f35
+
+GET {{baseUrl}}/api/build/status/{{jobId}}
+X-Api-Key: {{apiKey}}

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>VB_build</RootNamespace>
+    <AssemblyName>VB_build.Core</AssemblyName>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!--
+      VB6.EXE and the TLI (Visual Basic 6.0 IDE) automation component are 32-bit only.
+      Any process that loads this library (console app, Web API) must run as x86.
+    -->
+    <PlatformTarget>x86</PlatformTarget>
+    <!--
+      TLI is consumed via late-bound COM (Type.GetTypeFromProgID + dynamic) instead of a
+      design-time <COMReference>. This is intentional: the classic ResolveComReference
+      MSBuild task is only implemented in the .NET Framework desktop MSBuild and is not
+      supported by `dotnet build` / the cross-platform SDK MSBuild (MSB4803). Late binding
+      lets this project build with the standard `dotnet build`/`dotnet test` on any machine;
+      TLI ("Visual Basic 6.0 IDE") still needs to be registered on the machine at RUNTIME
+      (i.e. VB6 installed) wherever an actual build job executes.
+    -->
+  </PropertyGroup>
+
+</Project>
